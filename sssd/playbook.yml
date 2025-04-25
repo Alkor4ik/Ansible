@@ -1,0 +1,75 @@
+---
+- name: Ensure SSSD is installed, configured and running
+  hosts: all
+  become: true
+  vars:
+    sssd_domain: "exempl.corp"
+    sssd_ad_servers:
+      - ad1.exempl.corp
+      - ad2.exempl.corp
+    sssd_package_name: "sssd"
+    sssd_config_path: "/etc/sssd/sssd.conf"
+    sssd_service_name: "sssd"
+    # Дополнительные пакеты, которые могут потребоваться
+    required_packages:
+      - sssd
+      - sssd-tools
+      - sssd-ad  
+      - sssd-krb5
+      - sssd-ldap
+      - adcli
+
+  tasks:
+    - name: Check if SSSD is installed
+      ansible.builtin.package_facts:
+        manager: auto
+      tags: install
+
+    - name: Install required packages
+      ansible.builtin.package:
+        name: "{{ required_packages }}"
+        state: present
+      when: "'sssd' not in ansible_facts.packages"
+      tags: install
+      notify:
+        - Enable and start SSSD service
+
+    - name: Ensure SSSD configuration directory exists
+      ansible.builtin.file:
+        path: /etc/sssd
+        state: directory
+        mode: '0711'
+        owner: root
+        group: root
+
+    - name: Deploy SSSD configuration template
+      ansible.builtin.template:
+        src: sssd.conf.j2
+        dest: "{{ sssd_config_path }}"
+        mode: '0600'
+        owner: root
+        group: root
+        validate: /usr/sbin/sssd --genconf -c %s
+      notify:
+        - Restart SSSD service
+
+    - name: Ensure SELinux context is correct for SSSD config
+      ansible.builtin.file:
+        path: "{{ sssd_config_path }}"
+        setype: etc_t
+      when: ansible_facts.selinux.status == 'enabled'
+
+  handlers:
+    - name: Restart SSSD service
+      ansible.builtin.service:
+        name: "{{ sssd_service_name }}"
+        state: restarted
+        enabled: true
+      listen: "restart sssd"
+
+    - name: Enable and start SSSD service
+      ansible.builtin.service:
+        name: "{{ sssd_service_name }}"
+        state: started
+        enabled: true
+      listen: "enable and start sssd"

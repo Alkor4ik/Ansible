@@ -1,0 +1,29 @@
+[sssd]
+domains = {{ sssd_domain }}
+services = nss, pam
+
+[domain/{{ sssd_domain }}]
+ad_domain = {{ sssd_domain }}
+krb5_realm = {{ sssd_domain | upper }}
+{% if sssd_ad_servers is defined and sssd_ad_servers %}
+ad_server = {{ sssd_ad_servers | join(', ') }}
+{% endif %}
+cache_credentials = True
+id_provider = ad
+krb5_store_password_if_offline = True
+default_shell = /bin/bash
+use_fully_qualified_names = False
+fallback_homedir = /home/%u
+access_provider = ad
+ad_gpo_access_control = permissive
+override_homedir = /home/%u
+dyndns_update = false
+ldap_id_mapping = True
+ldap_group_name = cn
+ldap_group_object_class = group
+ldap_group_member = member
+ldap_user_object_class = user
+# create_home_dir = always
+# group_resolution_order = ad
+# ad_enable_gssapi = true
+#realmd_tags = manages-system joined-with-adcli
