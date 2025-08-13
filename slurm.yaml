@@ -1,0 +1,135 @@
+---
+######### Создание ползователя в ОС #########
+- name: Create OS user  
+  hosts: slurm_login,slurm_worker
+  become: yes
+  tasks:
+    - name: Create group
+      group: 
+        name: "{{ username }}"
+        state: present  
+
+    - name: Create user
+      user:
+        name: "{{ username }}"
+        home: "/home/{{ username }}"
+        shell: /bin/bash
+        generate_ssh_key: true
+        create_home: yes
+
+
+######### Создание ползователя в Slurm #########
+- name: Register user in Slurm
+  hosts: slurm_login
+  become: yes
+  tasks:
+
+    - name: Check if Slurm account exists
+      command: >
+        sacctmgr -n show account {{ username }} 
+      register: existing_account
+      changed_when: false
+      ignore_errors: yes
+
+    - name: create slurm account if missing
+      command: >
+        sacctmgr -i create account {{ username }}
+      when: existing_account.rc != 0 or existing_account.stdout == ""
+      register: account_creation
+      ignore_errors: yes
+      failed_when: >
+        account_creation.rc != 0 and
+        "{{ username }}" in account_creation.stdout
+
+    - name: check user in slurm
+      command: >
+        sacctmgr -n show user {{ username }}
+      register: slurm_user
+      ignore_errors: yes
+      failed_when: >
+        slurm_user.rc != 0 and
+        username not in slurm_user.stdout
+
+
+    - name: register user in slurm
+      command: >
+        sacctmgr -i create user
+        name={{ username }}
+        account={{ username }}
+      register: slurm_registration
+      changed_when: false
+      ignore_errors: yes
+      failed_when: >
+        slurm_registration.rc != 0 and
+        "Nothing added." not in slurm_registration.stdout
+
+    - name: Show registration status
+      debug:
+        msg: "Maby user {{ username }} already exists in Slurm"
+      when: "'Nothing added' in slurm_registration.stdout"
+
+
+######### Резервация ресс-в и назначение QoS в Slurm #########
+- name: Reserv_resources and qos for user
+  hosts: slurm_login
+  become: yes
+  vars:
+    # Default values for create user's ressources reservation
+    reservation:
+      cpu: 4       # Default CPU cores
+      mem: 8000    # Default memory in MB
+      duration: 20  # Default duration ( minuts )
+
+  tasks:
+  - name: Show vars for reservation and QoS
+    debug:
+      msg: "cpu:{{reservation.cpu}}, 
+        duration:{{reservation.duration}},
+        mem:{{reservation.mem}}"
+
+  - name: reserv_resources for user
+    command: >
+      sudo scontrol create reservation 
+      reservationname={{ username }}
+      account={{ username }}
+      start=now
+      duration={{ reservation.duration }}
+      tres=cpu={{ reservation.cpu }},mem={{ reservation.mem }}
+    register: "user_reservation"
+    changed_when: false
+    ignore_errors: yes
+    failed_when: >
+      user_reservation.rc != 0 and
+      "Duplicate reservation name" not in user_reservation.stderr
+
+  - name: add qos
+    command: >
+      sudo sacctmgr -i add qos name={{ username }}
+      maxtres=cpu={{ reservation.cpu}},mem={{ reservation.mem }}
+    register: "user_qos"
+    changed_when: false
+    ignore_errors: yes
+    failed_when: >
+      user_qos.rc != 0 and
+      "Nothing new added." not in user_qos.stdout
+
+  - name: add qos to user
+    shell: sudo sacctmgr -i modify user where name={{ username }} set qos={{ username }}
+    register: "add_qos_to_user"
+    changed_when: false
+    ignore_errors: yes
+
+
+
+######### Возврат переменных для подключения к кластеру Slurm #########  
+# - name: output generated key info
+#   hosts: slurm_login
+#   become: yes
+#   tasks:
+#     - name:
+#       command: cat /home/{{username}}/.ssh/id_rsa
+#       register: priv_ssh_key
+
+#     - name: Show private key location
+#       debug:
+#         msg: "{{ priv_ssh_key.stdout_lines }}" #"Private key generated at {{ username }}"
